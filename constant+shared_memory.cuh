@@ -15,7 +15,7 @@ namespace op
 #define TILE_WIDTH 16
 
 
-__constant__ float W_shared[100];
+__constant__ float W_shared[15000];
 
 __global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K)
 {
@@ -27,7 +27,10 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     We have some nice #defs for you below to simplify indexing. Feel free to use them, or create your own.
     */
 
-    //printf("K = %d \n", K);
+    // if(threadIdx.x == 0)
+    // {
+    // printf("K = %d \n", K);
+    // }
 
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
@@ -41,7 +44,6 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 
     int n, m, h0, w0, h_base, w_base, h, w;
     int X_tile_width = TILE_WIDTH + K - 1;
-    //extern __shared__ float shmem[2 * TILE_WIDTH * TILE_WIDTH];
     extern __shared__ float shmem[];
     float * X_shared = &shmem[0];
     //float * W_shared = &shmem[X_tile_width * X_tile_width];
@@ -50,8 +52,6 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     h0 = threadIdx.y;
     w0 = threadIdx.x;
     int W_grid = ceil(W_out / (TILE_WIDTH * 1.0));
-    //h_base = (blockIdx.z/W_grid) * TILE_WIDTH;
-    //w_base = (blockIdx.z % W_grid) * TILE_WIDTH;
     h_base = (blockIdx.z/W_grid) * TILE_WIDTH;
     w_base = (blockIdx.z % W_grid) * TILE_WIDTH;
     h = h_base + h0;
@@ -61,11 +61,12 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     float acc = 0.0;
     for(int c = 0; c < C; c++)
     {
-    //  if((h0 < K) && (w0 < K) && (m < M))
-    //  {
-    //    W_shared[h0 * K + w0] = k4d(m,c,h0,w0);
-    //  }
-    //  __syncthreads();
+      //if((h0 < K) && (w0 < K) && (m < M))
+      //{
+      //W_shared[h0 * K + w0] = k4d(m,c,h0,w0);
+      //}
+      //__syncthreads();
+
 
       //printf("Before loop \n");
       for(int i = h; i < h_base + X_tile_width; i += TILE_WIDTH)
@@ -87,8 +88,9 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
       {
         for(int q = 0; q < K; q++)
         {
-          if( ((h0 + p)< X_tile_width) && ( (w0 +p) < X_tile_width)) {
-            acc = acc + X_shared[(h0 + p) * X_tile_width + (w0 + q)] * W_shared[p * K + q];
+          if( ((h0 + p)< X_tile_width) && ( (w0 +p) < X_tile_width) && (m < M)) {
+            //acc = acc + X_shared[(h0 + p) * X_tile_width + (w0 + q)] * W_shared[p * K + q]; //,,c,p,q
+            acc = acc + X_shared[(h0 + p) * X_tile_width + (w0 + q)] * W_shared[m * C * K * K + c * K * K + p * K +q];
           }
         }
       }
@@ -104,6 +106,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     }
 
 
+    //printf("K = %d \n", K);
 
 
 
@@ -128,8 +131,6 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     // Extract the tensor dimensions into B,M,C,H,W,K
     // ...
 
-
-
     const int B = x.shape_[0];
     const int M = y.shape_[1];
     const int C = x.shape_[1];
@@ -148,7 +149,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     dim3 gridDim(B, M, Z);
 
 
-    cudaMemcpyToSymbol(W_shared, w.dptr_, K*K*sizeof(float));
+    cudaMemcpyToSymbol(W_shared, w.dptr_, M*C*K*K*sizeof(float));
 
     size_t shmem_size = sizeof(float) * ( (TILE_WIDTH + K-1)*(TILE_WIDTH + K-1) + K*K );
 
